@@ -28,6 +28,8 @@ ESP8266SAM *sam = new ESP8266SAM;
 
 // application states
 bool buttonActive;
+unsigned long longPressStartMillis;
+int longPressStage;
 
 // Sets or adds all pixels according to a boolean array
 void ledSetPixels(bool *pixels, bool add = false)
@@ -137,6 +139,67 @@ void click()
   }
 }
 
+void longPressStart()
+{
+  longPressStartMillis = millis();
+
+  // advance to stage 1
+  longPressStage = 1;
+  ledSetPixels(LED_CENTER_DOT);
+  strip.Show();
+  delay(20);
+}
+
+void longPress()
+{
+  unsigned long longPressTimeDiff = millis() - longPressStartMillis;
+  if (longPressTimeDiff >= 1000 && longPressStage < 2)
+  {
+    // advance to stage 2
+    longPressStage = 2;
+    ledSetPixels(LED_CENTER_DOT);
+    ledSetPixels(LED_INNER_RING, true);
+    strip.Show();
+    delay(20);
+  }
+  else if (longPressTimeDiff >= 2000 && longPressStage < 3)
+  {
+    // advance to stage 3
+    longPressStage = 3;
+    ledSetPixels(LED_CENTER_DOT);
+    ledSetPixels(LED_INNER_RING, true);
+    ledSetPixels(LED_OUTER_RING, true);
+    strip.Show();
+    delay(20);
+  }
+  else if (longPressTimeDiff >= 3000 && longPressStage < 4)
+  {
+    // advance to stage 4 (= application reset)
+    longPressStage = 4;
+
+    ledUnsetPixels();
+    strip.Show();
+    delay(100);
+
+    animateBlink();
+  }
+}
+
+void longPressStop()
+{
+  bool reset = longPressStage == 4;
+  longPressStage = 0;
+
+  ledUnsetPixels();
+  strip.Show();
+  delay(20);
+
+  if (reset)
+  {
+    ESP.restart();
+  }
+}
+
 void setup()
 {
   // this resets all the neopixels to an off state
@@ -153,6 +216,9 @@ void setup()
 
   // setup button
   button.attachClick(click);
+  button.attachLongPressStart(longPressStart);
+  button.attachLongPressStop(longPressStop);
+  button.attachDuringLongPress(longPress);
 
   // setup audio
   audio->begin();
