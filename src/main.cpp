@@ -2,6 +2,7 @@
 #include <AudioOutputI2S.h>
 #include <ESP8266SAM.h>
 #include <ESP8266WiFi.h>
+#include <ESP8266HTTPClient.h>
 #include <NeoPixelBus.h>
 #include <OneButton.h>
 #include <WiFiClient.h>
@@ -152,6 +153,75 @@ void animateWifiError()
   delay(20);
 }
 
+void enterErrorState(int errorCode)
+{
+  errorCode = errorCode;
+
+  if (applicationState != STATE_ERROR)
+  {
+    applicationState = STATE_ERROR;
+    timeFirstError = millis();
+    timeLastErrorAnimation = 0;
+  }
+}
+
+void exitErrorState()
+{
+  applicationState = STATE_READY;
+  errorCode = 0;
+}
+
+void handleErrorState()
+{
+  if (applicationState != STATE_ERROR || longPressStage > 0)
+  {
+    return;
+  }
+
+  unsigned long time = millis();
+
+  // change into standby if blinking for more than 30 minutes
+  if (time - timeFirstError >= 1800000)
+  {
+    applicationState = STATE_STANDBY;
+    return;
+  }
+
+  // blink each 6s
+  if (time - timeLastErrorAnimation >= 6000)
+  {
+    timeLastErrorAnimation = time;
+    switch (errorCode)
+    {
+    case ERR_NO_WIFI:
+      animateWifiError();
+      break;
+    }
+  }
+}
+
+void checkWifiSignal()
+{
+  unsigned long time = millis();
+
+  // only check Wifi each 2s
+  if (time - timeLastWifiCheck < 2000)
+  {
+    return;
+  }
+
+  timeLastWifiCheck = time;
+  if (WiFi.status() == WL_CONNECTED)
+  {
+    timeLastWifiConnected = time;
+    exitErrorState();
+  }
+  else
+  {
+    enterErrorState(ERR_NO_WIFI);
+  }
+}
+
 void click()
 {
   if (applicationState != STATE_READY)
@@ -226,75 +296,6 @@ void longPressStop()
   if (reset)
   {
     ESP.restart();
-  }
-}
-
-void exitErrorState()
-{
-  applicationState = STATE_READY;
-  errorCode = 0;
-}
-
-void enterErrorState(int errorCode)
-{
-  errorCode = errorCode;
-
-  if (applicationState != STATE_ERROR)
-  {
-    applicationState = STATE_ERROR;
-    timeFirstError = millis();
-    timeLastErrorAnimation = 0;
-  }
-}
-
-void handleErrorState()
-{
-  if (applicationState != STATE_ERROR || longPressStage > 0)
-  {
-    return;
-  }
-
-  unsigned long time = millis();
-
-  // change into standby if blinking for more than 30 minutes
-  if (time - timeFirstError >= 1800000)
-  {
-    applicationState = STATE_STANDBY;
-    return;
-  }
-
-  // blink each 6s
-  if (time - timeLastErrorAnimation >= 6000)
-  {
-    timeLastErrorAnimation = time;
-    switch (errorCode)
-    {
-    case ERR_NO_WIFI:
-      animateWifiError();
-      break;
-    }
-  }
-}
-
-void checkWifiSignal()
-{
-  unsigned long time = millis();
-
-  // only check Wifi each 2s
-  if (time - timeLastWifiCheck < 2000)
-  {
-    return;
-  }
-
-  timeLastWifiCheck = time;
-  if (WiFi.status() == WL_CONNECTED)
-  {
-    timeLastWifiConnected = time;
-    exitErrorState();
-  }
-  else
-  {
-    enterErrorState(ERR_NO_WIFI);
   }
 }
 
