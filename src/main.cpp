@@ -12,6 +12,8 @@
 // secrets must be declared in a separate file <secrets.h>
 const char *ssid = SECRET_SSID;
 const char *password = SECRET_PASS;
+const char *url = SECRET_URL;
+const char *fingerprint = SECRET_SHA1;
 
 const uint16_t PixelCount = 21;
 bool LED_CENTER_DOT[21] = {1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
@@ -20,6 +22,10 @@ bool LED_OUTER_RING[21] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1,
 bool LED_ALL[21] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
 bool LED_INNER_TOP[21] = {0, 1, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 bool LED_OUTER_TOP[21] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1};
+bool LED_QUARTER_1[21] = {0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+bool LED_QUARTER_2[21] = {0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0};
+bool LED_QUARTER_3[21] = {0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0};
+bool LED_QUARTER_4[21] = {0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1};
 
 const int STATE_READY = 0;
 const int STATE_ERROR = 1;
@@ -248,6 +254,55 @@ void click()
     applicationState = STATE_PARTY;
     animateCircle(false);
     sam->Say(audio, "The party is on.");
+
+    WiFiClientSecure httpsClient;
+    httpsClient.setFingerprint(fingerprint);
+    httpsClient.setTimeout(10000); // 10s
+    delay(1000);
+
+    sam->Say(audio, "Connecting.");
+    int retry = 0;
+    while ((!httpsClient.connect(url, 443)) && (retry < 5))
+    {
+      delay(100);
+      retry++;
+    }
+
+    if (retry == 5)
+    {
+      sam->Say(audio, "Connection failed.");
+    }
+    else
+    {
+      sam->Say(audio, "Connected to server.");
+    }
+
+    // Get headers (they usualy end by '\n\r\n')
+    // so read until '\n' and break at '\r'
+    while (httpsClient.connected())
+    {
+      String line = httpsClient.readStringUntil('\n');
+      if (line == "\r")
+      {
+        break;
+      }
+    }
+
+    // Read result line by line
+    String line;
+    while (httpsClient.available())
+    {
+      line = httpsClient.readStringUntil('\n');
+    }
+
+    if (line == "}")
+    {
+      sam->Say(audio, "Success.");
+    }
+    else
+    {
+      sam->Say(audio, "Error.");
+    }
   }
   else if (applicationState == STATE_PARTY)
   {
