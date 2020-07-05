@@ -36,8 +36,8 @@ ESP8266SAM *sam = new ESP8266SAM;
 int schedulerPass = 0;
 int applicationState = 0;
 int errorCode = 0;
-bool buttonActive;
-int longPressStage;
+bool buttonActive = false;
+int longPressStage = 0;
 
 unsigned long timeLongPressStart;
 unsigned long timeLastWifiConnected;
@@ -249,7 +249,7 @@ void enterErrorState(int errorCode)
 
 void handleErrorState()
 {
-  if (applicationState != STATE_ERROR)
+  if (applicationState != STATE_ERROR || longPressStage > 0)
   {
     return;
   }
@@ -318,7 +318,7 @@ void setup()
   audio->begin();
   audio->SetGain(0.5);
 
-  // check Wifi signal for 5s
+  // check Wifi signal for 10s
   int numChecks = 0;
   bool connected = false;
   while (!connected)
@@ -331,7 +331,7 @@ void setup()
     {
       timeLastWifiConnected = timeLastWifiCheck;
     }
-    else if (numChecks < 10)
+    else if (numChecks < 20)
     {
       animateWiFiConnect(500);
     }
