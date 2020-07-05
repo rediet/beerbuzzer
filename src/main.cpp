@@ -24,6 +24,7 @@ bool LED_OUTER_TOP[21] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 
 const int STATE_READY = 0;
 const int STATE_ERROR = 1;
 const int STATE_STANDBY = 2;
+const int STATE_PARTY = 3;
 
 const int ERR_NO_WIFI = 1;
 
@@ -167,6 +168,11 @@ void enterErrorState(int errorCode)
 
 void exitErrorState()
 {
+  if (applicationState != STATE_ERROR)
+  {
+    return;
+  }
+
   applicationState = STATE_READY;
   errorCode = 0;
 }
@@ -218,23 +224,35 @@ void checkWifiSignal()
   }
   else
   {
-    enterErrorState(ERR_NO_WIFI);
+    // in party mode we do not care about Wifi...
+    // we just dance all night long!
+    if (applicationState != STATE_PARTY)
+    {
+      enterErrorState(ERR_NO_WIFI);
+    }
   }
 }
 
 void click()
 {
-  if (applicationState != STATE_READY)
+  if (applicationState == STATE_STANDBY)
+  {
+    ESP.reset();
+  }
+  else if (applicationState == STATE_ERROR)
   {
     return;
   }
-
-  buttonActive = !buttonActive;
-  animateCircle(!buttonActive);
-
-  if (buttonActive)
+  else if (applicationState == STATE_READY)
   {
+    applicationState = STATE_PARTY;
+    animateCircle(false);
     sam->Say(audio, "The party is on.");
+  }
+  else if (applicationState == STATE_PARTY)
+  {
+    applicationState = STATE_READY;
+    animateCircle(true);
   }
 }
 
@@ -317,7 +335,7 @@ void setup()
 
   // setup audio
   audio->begin();
-  audio->SetGain(0.5);
+  audio->SetGain(0.1);
 
   // check Wifi signal for 10s
   int numChecks = 0;
@@ -356,6 +374,12 @@ void loop()
 {
   // check for button press
   button.tick();
+
+  // the only thing to do in standby is a button press wakeup
+  if (applicationState == STATE_STANDBY)
+  {
+    return;
+  }
 
   // primitive scheduling
   schedulerPass = (schedulerPass + 1) % 2;
