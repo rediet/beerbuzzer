@@ -3,17 +3,18 @@
 #include <ESP8266SAM.h>
 #include <ESP8266WiFi.h>
 #include <ESP8266HTTPClient.h>
+#include <ESP8266WebServer.h>
 #include <NeoPixelBus.h>
 #include <OneButton.h>
-#include <WiFiClient.h>
 #include <secrets.h>
 
 // constants
 // secrets must be declared in a separate file <secrets.h>
 const char *ssid = SECRET_SSID;
 const char *password = SECRET_PASS;
-const char *url = SECRET_URL;
-const char *fingerprint = SECRET_SHA1;
+const char *host = SECRET_HOST;
+const char *resource = SECRET_RESOURCE;
+const char fingerprint[] PROGMEM = SECRET_SHA1;
 
 const uint16_t PixelCount = 21;
 bool LED_CENTER_DOT[21] = {1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
@@ -39,6 +40,7 @@ NeoPixelBus<NeoRgbFeature, NeoEsp8266Uart0800KbpsMethod> strip(PixelCount);
 OneButton button(D1, true);
 AudioOutputI2S *audio = new AudioOutputI2S();
 ESP8266SAM *sam = new ESP8266SAM;
+ESP8266WebServer server(80);
 
 // application states
 int schedulerPass = 0;
@@ -52,6 +54,35 @@ unsigned long timeLastWifiConnected;
 unsigned long timeLastWifiCheck;
 unsigned long timeFirstError;
 unsigned long timeLastErrorAnimation;
+
+int nextMessage = 0;
+int messageSize = 0;
+int messageStart = 0;
+String messages[50];
+
+void logMessage(String message)
+{
+  messages[nextMessage] = message;
+  nextMessage = (nextMessage + 1) % 50;
+  if (messageSize < 50)
+  {
+    messageSize++;
+  }
+  else
+  {
+    messageStart = (messageStart + 1) % 50;
+  }
+}
+
+void logTrace(String message)
+{
+  logMessage(String("[Trace] " + message));
+}
+
+void logError(String message)
+{
+  logMessage(String("[Error] " + message));
+}
 
 // Sets or adds all pixels according to a boolean array (pixel mask)
 void ledSetPixels(bool *pixels, bool add = false)
@@ -260,28 +291,40 @@ void click()
     httpsClient.setTimeout(10000); // 10s
     delay(1000);
 
-    sam->Say(audio, "Connecting.");
+    logTrace("Connecting to " + String(host));
     int retry = 0;
-    while ((!httpsClient.connect(url, 443)) && (retry < 5))
+    int maxRetries = 3;
+    while ((!httpsClient.connect(host, 443)) && (retry < maxRetries))
     {
       delay(100);
       retry++;
     }
 
-    if (retry == 5)
+    if (retry == maxRetries)
     {
+      logError("Connection failed");
       sam->Say(audio, "Connection failed.");
     }
     else
     {
+      logTrace("Connected");
       sam->Say(audio, "Connected to server.");
     }
+
+    // Do request
+    String request = String("GET ") + resource + " HTTP/1.1\r\n" +
+                     "Host: " + host + "\r\n" +
+                     "Connection: close\r\n\r\n";
+    logTrace(String("Requesting ") + host + resource);
+    logTrace(request);
+    httpsClient.print(request);
 
     // Get headers (they usualy end by '\n\r\n')
     // so read until '\n' and break at '\r'
     while (httpsClient.connected())
     {
       String line = httpsClient.readStringUntil('\n');
+      logTrace(line);
       if (line == "\r")
       {
         break;
@@ -292,10 +335,11 @@ void click()
     String line;
     while (httpsClient.available())
     {
-      line = httpsClient.readStringUntil('\n');
+      line = httpsClient.readString();
+      logTrace(line);
     }
 
-    if (line == "}")
+    if (line.length() > 3)
     {
       sam->Say(audio, "Success.");
     }
@@ -372,6 +416,22 @@ void longPressStop()
   }
 }
 
+void serverSendState()
+{
+  String log = "Last log entries:\n";
+  for (int i = 0; i < messageSize; i++)
+  {
+    int index = (i + messageStart) % 50;
+    log.concat(messages[index]);
+    if (!messages[index].endsWith("\n"))
+    {
+      log.concat("\n");
+    }
+  }
+
+  server.send(200, "text/plain", log);
+}
+
 void setup()
 {
   // setup wifi
@@ -416,6 +476,10 @@ void setup()
     }
   }
 
+  // setup webserver
+  server.on("/", serverSendState);
+  server.begin();
+
   // singal setup complete
   if (applicationState != STATE_ERROR)
   {
@@ -427,10 +491,10 @@ void setup()
 
 void loop()
 {
-  // check for button press
   button.tick();
+  server.handleClient();
 
-  // the only thing to do in standby is a button press wakeup
+  // do not run other background tasks in standby
   if (applicationState == STATE_STANDBY)
   {
     return;
