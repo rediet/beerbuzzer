@@ -5,13 +5,13 @@
 #include <NeoPixelBus.h>
 #include <OneButton.h>
 #include <WiFiClient.h>
-
-// This file includes the declare statement for SECRET_SSID, SECRERT_PASS
 #include <secrets.h>
 
 // constants
+// secrets must be declared in a separate file <secrets.h>
 const char *ssid = SECRET_SSID;
 const char *password = SECRET_PASS;
+
 const uint16_t PixelCount = 21;
 bool LED_CENTER_DOT[21] = {1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 bool LED_INNER_RING[21] = {0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
@@ -20,6 +20,12 @@ bool LED_ALL[21] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 
 bool LED_INNER_TOP[21] = {0, 1, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 bool LED_OUTER_TOP[21] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1};
 
+const int STATE_READY = 0;
+const int STATE_ERROR = 1;
+const int STATE_STANDBY = 2;
+
+const int ERR_NO_WIFI = 1;
+
 // sensors and output variables
 NeoPixelBus<NeoRgbFeature, NeoEsp8266Uart0800KbpsMethod> strip(PixelCount);
 OneButton button(D1, true);
@@ -27,11 +33,19 @@ AudioOutputI2S *audio = new AudioOutputI2S();
 ESP8266SAM *sam = new ESP8266SAM;
 
 // application states
+int schedulerPass = 0;
+int applicationState = 0;
+int errorCode = 0;
 bool buttonActive;
-unsigned long longPressStartMillis;
 int longPressStage;
 
-// Sets or adds all pixels according to a boolean array
+unsigned long timeLongPressStart;
+unsigned long timeLastWifiConnected;
+unsigned long timeLastWifiCheck;
+unsigned long timeFirstError;
+unsigned long timeLastErrorAnimation;
+
+// Sets or adds all pixels according to a boolean array (pixel mask)
 void ledSetPixels(bool *pixels, bool add = false)
 {
   for (int i = 0; i < PixelCount; i++)
@@ -50,10 +64,7 @@ void ledSetPixels(bool *pixels, bool add = false)
 // Resets all pixels
 void ledUnsetPixels()
 {
-  for (int i = 0; i < PixelCount; i++)
-  {
-    strip.SetPixelColor(i, RgbColor(0));
-  }
+  strip.ClearTo(RgbColor(0));
 }
 
 void animateCircle(bool reverse)
@@ -96,7 +107,7 @@ void animateBlink()
   }
 }
 
-void animateWiFi(int duration)
+void animateWiFiConnect(int duration)
 {
   int waitdelay = (duration - 20) / 4;
   if (waitdelay < 20)
@@ -128,8 +139,26 @@ void animateWiFi(int duration)
   delay(20);
 }
 
+void animateWifiError()
+{
+  ledSetPixels(LED_CENTER_DOT);
+  ledSetPixels(LED_INNER_TOP, true);
+  ledSetPixels(LED_OUTER_TOP, true);
+  strip.Show();
+  delay(1000);
+
+  ledUnsetPixels();
+  strip.Show();
+  delay(20);
+}
+
 void click()
 {
+  if (applicationState != STATE_READY)
+  {
+    return;
+  }
+
   buttonActive = !buttonActive;
   animateCircle(!buttonActive);
 
@@ -141,7 +170,7 @@ void click()
 
 void longPressStart()
 {
-  longPressStartMillis = millis();
+  timeLongPressStart = millis();
 
   // advance to stage 1
   longPressStage = 1;
@@ -152,7 +181,7 @@ void longPressStart()
 
 void longPress()
 {
-  unsigned long longPressTimeDiff = millis() - longPressStartMillis;
+  unsigned long longPressTimeDiff = millis() - timeLongPressStart;
   if (longPressTimeDiff >= 1000 && longPressStage < 2)
   {
     // advance to stage 2
@@ -200,19 +229,84 @@ void longPressStop()
   }
 }
 
+void exitErrorState()
+{
+  applicationState = STATE_READY;
+  errorCode = 0;
+}
+
+void enterErrorState(int errorCode)
+{
+  errorCode = errorCode;
+
+  if (applicationState != STATE_ERROR)
+  {
+    applicationState = STATE_ERROR;
+    timeFirstError = millis();
+    timeLastErrorAnimation = 0;
+  }
+}
+
+void handleErrorState()
+{
+  if (applicationState != STATE_ERROR)
+  {
+    return;
+  }
+
+  unsigned long time = millis();
+
+  // change into standby if blinking for more than 30 minutes
+  if (time - timeFirstError >= 1800000)
+  {
+    applicationState = STATE_STANDBY;
+    return;
+  }
+
+  // blink each 6s
+  if (time - timeLastErrorAnimation >= 6000)
+  {
+    timeLastErrorAnimation = time;
+    switch (errorCode)
+    {
+    case ERR_NO_WIFI:
+      animateWifiError();
+      break;
+    }
+  }
+}
+
+void checkWifiSignal()
+{
+  unsigned long time = millis();
+
+  // only check Wifi each 2s
+  if (time - timeLastWifiCheck < 2000)
+  {
+    return;
+  }
+
+  timeLastWifiCheck = time;
+  if (WiFi.status() == WL_CONNECTED)
+  {
+    timeLastWifiConnected = time;
+    exitErrorState();
+  }
+  else
+  {
+    enterErrorState(ERR_NO_WIFI);
+  }
+}
+
 void setup()
 {
-  // this resets all the neopixels to an off state
-  strip.Begin();
-  strip.Show();
-
   // setup wifi
   WiFi.mode(WIFI_STA);
   WiFi.begin(ssid, password);
-  while (WiFi.status() != WL_CONNECTED)
-  {
-    animateWiFi(500);
-  }
+
+  // setup and reset all the neopixels to an off state
+  strip.Begin();
+  strip.Show();
 
   // setup button
   button.attachClick(click);
@@ -224,12 +318,53 @@ void setup()
   audio->begin();
   audio->SetGain(0.5);
 
+  // check Wifi signal for 5s
+  int numChecks = 0;
+  bool connected = false;
+  while (!connected)
+  {
+    connected = WiFi.status() == WL_CONNECTED;
+    timeLastWifiCheck = millis();
+    numChecks++;
+
+    if (connected)
+    {
+      timeLastWifiConnected = timeLastWifiCheck;
+    }
+    else if (numChecks < 10)
+    {
+      animateWiFiConnect(500);
+    }
+    else
+    {
+      enterErrorState(ERR_NO_WIFI);
+      break;
+    }
+  }
+
   // singal setup complete
-  animateBlink();
+  if (applicationState != STATE_ERROR)
+  {
+    applicationState = STATE_READY;
+    delay(200);
+    animateBlink();
+  }
 }
 
 void loop()
 {
   // check for button press
   button.tick();
+
+  // primitive scheduling
+  schedulerPass = (schedulerPass + 1) % 2;
+  switch (schedulerPass)
+  {
+  case 0:
+    checkWifiSignal();
+    break;
+  case 1:
+    handleErrorState();
+    break;
+  }
 }
