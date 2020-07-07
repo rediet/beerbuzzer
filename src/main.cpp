@@ -43,9 +43,9 @@ ESP8266SAM *sam = new ESP8266SAM;
 ESP8266WebServer server(80);
 
 // application states
-int schedulerPass = 0;
+int appSchedulerPass = 0;
 int applicationState = 0;
-int errorCode = 0;
+int applicationErrorCode = 0;
 bool buttonActive = false;
 int longPressStage = 0;
 
@@ -193,7 +193,7 @@ void animateWifiError()
 
 void enterErrorState(int errorCode)
 {
-  errorCode = errorCode;
+  applicationErrorCode = errorCode;
 
   if (applicationState != STATE_ERROR)
   {
@@ -211,7 +211,7 @@ void exitErrorState()
   }
 
   applicationState = STATE_READY;
-  errorCode = 0;
+  applicationErrorCode = 0;
 }
 
 void handleErrorState()
@@ -234,7 +234,7 @@ void handleErrorState()
   if (time - timeLastErrorAnimation >= 6000)
   {
     timeLastErrorAnimation = time;
-    switch (errorCode)
+    switch (applicationErrorCode)
     {
     case ERR_NO_WIFI:
       animateWifiError();
@@ -472,7 +472,7 @@ void setup()
     else
     {
       enterErrorState(ERR_NO_WIFI);
-      break;
+      return;
     }
   }
 
@@ -481,12 +481,9 @@ void setup()
   server.begin();
 
   // singal setup complete
-  if (applicationState != STATE_ERROR)
-  {
-    applicationState = STATE_READY;
-    delay(200);
-    animateBlink();
-  }
+  applicationState = STATE_READY;
+  delay(200);
+  animateBlink();
 }
 
 void loop()
@@ -501,8 +498,8 @@ void loop()
   }
 
   // primitive scheduling
-  schedulerPass = (schedulerPass + 1) % 2;
-  switch (schedulerPass)
+  appSchedulerPass = (appSchedulerPass + 1) % 2;
+  switch (appSchedulerPass)
   {
   case 0:
     checkWifiSignal();
