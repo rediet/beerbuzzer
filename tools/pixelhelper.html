@@ -136,7 +136,9 @@
     <div style="display: flex;">
         <div style="flex: 0 0 auto">
             <div>
-                <p>Paint over dots using the mouse and command/ctrl key.<br />Deselect using alt key.</p>
+                <p>Paint over dots using the mouse and command/ctrl key.<br />
+                    Deselect using alt key.<br />
+                    Click record to add an animation sequence.</p>
             </div>
             <div id="display">
                 <div id="center">
@@ -206,7 +208,6 @@
 
             // print result
             document.getElementById("pixelcombo").innerHTML = ids;
-            console.log(ids);
         }
 
         var record = function () {
@@ -237,14 +238,16 @@
             var sequence = animationSequence[animationIndex];
             setdots(sequence["leds"]);
             animationIndex = (animationIndex + 1) % animationSequence.length;
+            console.log(sequence["leds"]);
 
             setTimeout(play, sequence["duration"]);
         }
 
         var update = function () {
             var jsonSequence = document.getElementById("animationSequence").value;
-            console.log(jsonSequence);
             animationSequence = JSON.parse(jsonSequence);
+
+            animationIndex = 0;
         }
 
         window.onload = function () {
