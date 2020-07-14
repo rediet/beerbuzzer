@@ -37,7 +37,7 @@
             pointer-events: auto;
             height: 30px;
             width: 30px;
-            background-color: #bbbbbb;
+            background-color: #d9d9d9;
             border-radius: 50%;
             display: inline-block;
         }
@@ -133,52 +133,59 @@
 </head>
 
 <body>
-    <div>
-        <p>Paint over dots using the mouse and command/ctrl key. Deselect using alt key.</p>
-    </div>
-    <div id="display">
-        <div id="center">
-            <div class="container center c1"><span class="dot" id="dot1"></span></div>
-            <div class="container inner c2"><span class="dot" id="dot2"></span></div>
-            <div class="container inner c3"><span class="dot" id="dot3"></span></div>
-            <div class="container inner c4"><span class="dot" id="dot4"></span></div>
-            <div class="container inner c5"><span class="dot" id="dot5"></span></div>
-            <div class="container inner c6"><span class="dot" id="dot6"></span></div>
-            <div class="container inner c7"><span class="dot" id="dot7"></span></div>
-            <div class="container inner c8"><span class="dot" id="dot8"></span></div>
-            <div class="container inner c9"><span class="dot" id="dot9"></span></div>
-            <div class="container outer c10"><span class="dot" id="dot10"></span></div>
-            <div class="container outer c11"><span class="dot" id="dot11"></span></div>
-            <div class="container outer c12"><span class="dot" id="dot12"></span></div>
-            <div class="container outer c13"><span class="dot" id="dot13"></span></div>
-            <div class="container outer c14"><span class="dot" id="dot14"></span></div>
-            <div class="container outer c15"><span class="dot" id="dot15"></span></div>
-            <div class="container outer c16"><span class="dot" id="dot16"></span></div>
-            <div class="container outer c17"><span class="dot" id="dot17"></span></div>
-            <div class="container outer c18"><span class="dot" id="dot18"></span></div>
-            <div class="container outer c19"><span class="dot" id="dot19"></span></div>
-            <div class="container outer c20"><span class="dot" id="dot20"></span></div>
-            <div class="container outer c21"><span class="dot" id="dot21"></span></div>
+    <div style="display: flex;">
+        <div style="flex: 0 0 auto">
+            <div>
+                <p>Paint over dots using the mouse and command/ctrl key.<br />Deselect using alt key.</p>
+            </div>
+            <div id="display">
+                <div id="center">
+                    <div class="container center c1"><span class="dot" id="dot1"></span></div>
+                    <div class="container inner c2"><span class="dot" id="dot2"></span></div>
+                    <div class="container inner c3"><span class="dot" id="dot3"></span></div>
+                    <div class="container inner c4"><span class="dot" id="dot4"></span></div>
+                    <div class="container inner c5"><span class="dot" id="dot5"></span></div>
+                    <div class="container inner c6"><span class="dot" id="dot6"></span></div>
+                    <div class="container inner c7"><span class="dot" id="dot7"></span></div>
+                    <div class="container inner c8"><span class="dot" id="dot8"></span></div>
+                    <div class="container inner c9"><span class="dot" id="dot9"></span></div>
+                    <div class="container outer c10"><span class="dot" id="dot10"></span></div>
+                    <div class="container outer c11"><span class="dot" id="dot11"></span></div>
+                    <div class="container outer c12"><span class="dot" id="dot12"></span></div>
+                    <div class="container outer c13"><span class="dot" id="dot13"></span></div>
+                    <div class="container outer c14"><span class="dot" id="dot14"></span></div>
+                    <div class="container outer c15"><span class="dot" id="dot15"></span></div>
+                    <div class="container outer c16"><span class="dot" id="dot16"></span></div>
+                    <div class="container outer c17"><span class="dot" id="dot17"></span></div>
+                    <div class="container outer c18"><span class="dot" id="dot18"></span></div>
+                    <div class="container outer c19"><span class="dot" id="dot19"></span></div>
+                    <div class="container outer c20"><span class="dot" id="dot20"></span></div>
+                    <div class="container outer c21"><span class="dot" id="dot21"></span></div>
+                </div>
+            </div>
+            <div>
+                <p id="pixelcombo"></p>
+            </div>
+        </div>
+        <div style="flex: 1 1 auto">
+            <div style="margin:18px;">
+                <input id="record" type="submit" value="record" />
+                <span>&nbsp;</span>
+                <input id="play" type="submit" value="play" />
+                <input id="pause" type="submit" value="pause" />
+                <span>&nbsp;</span>
+                <input id="update" type="submit" value="update" />
+            </div>
+            <div style="height: 100%;">
+                <textarea id="animationSequence" style="width:100%; height:100%;"></textarea>
+            </div>
         </div>
     </div>
-    <div>
-        <p id="pixelcombo"></p>
-    </div>
     <script>
-        window.onload = function () {
-            var dots = document.getElementsByClassName("dot");
-            for (var i = 0; i < dots.length; i++) {
-                dots[i].addEventListener("mouseover", function (evt) {
-                    if (evt.metaKey || evt.ctrlKey) {
-                        this.classList.add("active");
-                        showCombo();
-                    } else if (evt.altKey) {
-                        this.classList.remove("active");
-                        showCombo();
-                    }
-                });
-            }
-        };
+        // jsonArray [{led: [0,1,...], duration: 500}]
+        var animationSequence = new Array();
+        var animationIndex = 0;
+        var animationPause = false;
 
         var showCombo = function () {
             var dots = document.getElementsByClassName("dot");
@@ -198,9 +205,79 @@
             }
 
             // print result
-            document.getElementById("pixelcombo").innerHTML = "{" + ids + "};";
+            document.getElementById("pixelcombo").innerHTML = ids;
             console.log(ids);
         }
+
+        var record = function () {
+            var pixelcombo = document.getElementById("pixelcombo");
+            var jsonstring = "{\"leds\":[" + pixelcombo.innerHTML + "],\"duration\":500}";
+
+            var objcombo = JSON.parse(jsonstring);
+            animationSequence.push(objcombo);
+
+            document.getElementById("animationSequence").value = JSON.stringify(animationSequence);
+        }
+
+        var setdots = function (ids) {
+            var dots = document.getElementsByClassName("dot");
+            for (var i = 0; i < dots.length; i++) {
+                if (ids[i] == 1) {
+                    dots[i].classList.add("active");
+                } else {
+                    dots[i].classList.remove("active");
+                }
+            }
+        }
+
+        var play = function () {
+            if (!animationSequence.length) return;
+            if (animationPause) return;
+
+            var sequence = animationSequence[animationIndex];
+            setdots(sequence["leds"]);
+            animationIndex = (animationIndex + 1) % animationSequence.length;
+
+            setTimeout(play, sequence["duration"]);
+        }
+
+        var update = function () {
+            var jsonSequence = document.getElementById("animationSequence").value;
+            console.log(jsonSequence);
+            animationSequence = JSON.parse(jsonSequence);
+        }
+
+        window.onload = function () {
+            var dots = document.getElementsByClassName("dot");
+            for (var i = 0; i < dots.length; i++) {
+                dots[i].addEventListener("mousemove", function (evt) {
+                    if (evt.metaKey || evt.ctrlKey) {
+                        this.classList.add("active");
+                        showCombo();
+                    } else if (evt.altKey) {
+                        this.classList.remove("active");
+                        showCombo();
+                    }
+                });
+            }
+
+            document.getElementById("record").addEventListener("click", function () {
+                record();
+            });
+
+            document.getElementById("play").addEventListener("click", function () {
+                animationPause = false;
+                play();
+            });
+
+            document.getElementById("pause").addEventListener("click", function () {
+                animationPause = true;
+            });
+
+            document.getElementById("update").addEventListener("click", function () {
+                update();
+            });
+        };
     </script>
 </body>
 
