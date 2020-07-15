@@ -34,10 +34,10 @@ const int STATE_PARTY = 3;
 
 const int ERR_NO_WIFI = 1;
 
-const char *BUZZER_PARTY = "PARTY";
-const char *BUZZER_ANNOUNCED = "ANNOUNCED";
-const char *BUZZER_REFUSED = "REFUSED";
-const char *BUZZER_FAILED = "FAILED";
+const char *WEBHOOK_RESPONSE_PARTY = "PARTY";
+const char *WEBHOOK_RESPONSE_ANNOUNCED = "ANNOUNCED";
+const char *WEBHOOK_RESPONSE_REFUSED = "REFUSED";
+const char *WEBHOOK_RESPONSE_FAILED = "FAILED";
 
 // sensors and output variables
 NeoPixelBus<NeoRgbFeature, NeoEsp8266Uart0800KbpsMethod> strip(PixelCount);
@@ -391,8 +391,130 @@ void checkWifiSignal()
   }
 }
 
+// calls the webhook and returns true if the application should stay in party mode
+bool callTeamsWebhook()
+{
+  WiFiClientSecure httpsClient;
+  httpsClient.setFingerprint(fingerprint);
+  httpsClient.setTimeout(10000); // 10s
+
+  // Connect to host (normally this step is fast)
+  logTrace("Connecting to " + String(host));
+  int retry = 0;
+  int maxRetries = 3;
+  while ((!httpsClient.connect(host, 443)) && (retry < maxRetries))
+  {
+    if (retry == 0)
+    {
+      ledShowPixels(LED_VOICE);
+      sam->Say(audio, "The network is busy.");
+      ledHidePixels();
+    }
+    else
+    {
+      delay(100);
+    }
+    retry++;
+  }
+
+  // Notify about result and abort if necessary
+  if (retry == maxRetries)
+  {
+    logError("Connection failed");
+
+    ledShowPixels(LED_VOICE);
+    sam->Say(audio, "Connection failed.");
+    ledHidePixels();
+    delay(500);
+    ledShowPixels(LED_VOICE);
+    sam->Say(audio, "Sorry guys.");
+    ledHidePixels();
+    delay(500);
+    ledShowPixels(LED_VOICE);
+    sam->Say(audio, "You have to party alone.");
+    ledHidePixels();
+    delay(100);
+
+    return true;
+  }
+  else
+  {
+    logTrace("Connected");
+
+    ledShowPixels(LED_VOICE);
+    sam->Say(audio, "Let's call our friends.");
+    ledHidePixels();
+  }
+
+  // Do the actual request (this will take some time)
+  String request = String("GET ") + resource + " HTTP/1.1\r\n" +
+                   "Host: " + host + "\r\n" +
+                   "Connection: close\r\n\r\n";
+  logTrace(String("Requesting ") + host + resource);
+  logTrace(request);
+  httpsClient.print(request);
+
+  // Read headers (they end with '\n\r\n' so read until '\n' and break at '\r')
+  while (httpsClient.connected())
+  {
+    String line = httpsClient.readStringUntil('\n');
+    logTrace(line);
+    if (line == "\r")
+    {
+      break;
+    }
+  }
+
+  // Read result line by line
+  String line;
+  while (httpsClient.available())
+  {
+    line = httpsClient.readString();
+    logTrace(line);
+  }
+
+  if (line == WEBHOOK_RESPONSE_PARTY)
+  {
+    ledShowPixels(LED_VOICE);
+    sam->Say(audio, "O K. Good luck.");
+    ledHidePixels();
+
+    return true;
+  }
+  else if (line == WEBHOOK_RESPONSE_ANNOUNCED)
+  {
+    ledShowPixels(LED_VOICE);
+    sam->Say(audio, "O K. In a few hours.");
+    ledHidePixels();
+
+    return false;
+  }
+  else if (line == WEBHOOK_RESPONSE_REFUSED)
+  {
+    ledShowPixels(LED_VOICE);
+    sam->Say(audio, "Oh. Its a bad time.");
+    ledHidePixels();
+
+    return false;
+  }
+  else
+  {
+    ledShowPixels(LED_VOICE);
+    sam->Say(audio, "That didn't go well.");
+    ledHidePixels();
+    delay(500);
+    ledShowPixels(LED_VOICE);
+    sam->Say(audio, "I think nobody is coming.");
+    ledHidePixels();
+
+    return true;
+  }
+}
+
 void click()
 {
+  pauseAnimation();
+
   if (applicationState == STATE_STANDBY)
   {
     ESP.reset();
@@ -419,98 +541,12 @@ void click()
     sam->Say(audio, "The party is on.");
     ledHidePixels();
 
-    WiFiClientSecure httpsClient;
-    httpsClient.setFingerprint(fingerprint);
-    httpsClient.setTimeout(10000); // 10s
-
-    logTrace("Connecting to " + String(host));
-    int retry = 0;
-    int maxRetries = 3;
-    while ((!httpsClient.connect(host, 443)) && (retry < maxRetries))
+    bool stayInPartyMode = callTeamsWebhook();
+    if (!stayInPartyMode)
     {
-      if (retry == 0)
-      {
-        ledShowPixels(LED_VOICE);
-        sam->Say(audio, "The network is busy.");
-        ledHidePixels();
-      }
-      else
-      {
-        delay(100);
-      }
-      retry++;
-    }
-
-    if (retry == maxRetries)
-    {
-      logError("Connection failed");
-
-      ledShowPixels(LED_VOICE);
-      sam->Say(audio, "Connection failed.");
-      ledHidePixels();
-      delay(500);
-      ledShowPixels(LED_VOICE);
-      sam->Say(audio, "Sorry guys.");
-      ledHidePixels();
-      delay(500);
-      ledShowPixels(LED_VOICE);
-      sam->Say(audio, "You have to party alone.");
-      ledHidePixels();
-      delay(100);
-      return;
-    }
-    else
-    {
-      logTrace("Connected");
-
-      ledShowPixels(LED_VOICE);
-      sam->Say(audio, "Let's call our friends.");
-      ledHidePixels();
-    }
-
-    // Do request
-    String request = String("GET ") + resource + " HTTP/1.1\r\n" +
-                     "Host: " + host + "\r\n" +
-                     "Connection: close\r\n\r\n";
-    logTrace(String("Requesting ") + host + resource);
-    logTrace(request);
-    httpsClient.print(request);
-
-    // Get headers (they usualy end by '\n\r\n')
-    // so read until '\n' and break at '\r'
-    while (httpsClient.connected())
-    {
-      String line = httpsClient.readStringUntil('\n');
-      logTrace(line);
-      if (line == "\r")
-      {
-        break;
-      }
-    }
-
-    // Read result line by line
-    String line;
-    while (httpsClient.available())
-    {
-      line = httpsClient.readString();
-      logTrace(line);
-    }
-
-    if (line.length() > 3)
-    {
-      ledShowPixels(LED_VOICE);
-      sam->Say(audio, "O K. Good luck.");
-      ledHidePixels();
-    }
-    else
-    {
-      ledShowPixels(LED_VOICE);
-      sam->Say(audio, "That didn't go well.");
-      ledHidePixels();
-      delay(500);
-      ledShowPixels(LED_VOICE);
-      sam->Say(audio, "I think nobody is coming.");
-      ledHidePixels();
+      applicationState = STATE_READY;
+      ledShowPixels(LED_ALL);
+      animateCircle(true);
     }
   }
   else if (applicationState == STATE_PARTY)
@@ -522,6 +558,8 @@ void click()
     delay(100);
     animateBlink();
   }
+
+  resumeAnimation();
 }
 
 void doubleClick()
