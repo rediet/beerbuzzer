@@ -27,12 +27,18 @@ bool LED_OUTER_TOP[21] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 
 bool LED_ALL_TOP[21] = {1, 1, 1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1};
 bool LED_VOICE[21] = {1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0};
 
+// Base states:   READY/ERROR
+// Higher states: PARTY/SETTINGS/STANDBY
 const int STATE_READY = 0;
 const int STATE_ERROR = 1;
 const int STATE_STANDBY = 2;
 const int STATE_PARTY = 3;
+const int STATE_SETTINGS = 4;
 
 const int ERR_NO_WIFI = 1;
+
+const int SETTINGS_EXIT = 0;
+const int SETTINGS_IP = 1;
 
 const char *WEBHOOK_RESPONSE_PARTY = "PARTY";
 const char *WEBHOOK_RESPONSE_ANNOUNCED = "ANNOUNCED";
@@ -55,16 +61,16 @@ struct AnimationFrame
 };
 
 // application states
-int applicationState = 0;
+int applicationState = STATE_READY;
+int applicationStatePrevious = -1;
 int applicationErrorCode = 0;
-bool buttonActive = false;
+int applicationSettingsCode = 0;
 int longPressStage = 0;
 
 unsigned long timeLongPressStart;
 unsigned long timeLastWifiConnected;
 unsigned long timeLastWifiCheck;
-unsigned long timeFirstError;
-unsigned long timeLastErrorAnimation;
+unsigned long timeLastStateChange;
 unsigned long timeAnimationNext;
 unsigned long timeAnimationPause;
 
@@ -255,6 +261,16 @@ void animateCircle(bool reverse)
   }
 }
 
+void animateCircleForward()
+{
+  animateCircle(false);
+}
+
+void animateCircleBackward()
+{
+  animateCircle(true);
+}
+
 void animateBlink()
 {
   int passes = 3;
@@ -312,6 +328,19 @@ void startAnimateWifiError()
 }
 
 /* APPLICATION LOGIC --------------------------------------------- */
+void enterApplicationState(int state)
+{
+  applicationStatePrevious = applicationState;
+  applicationState = state;
+  timeLastStateChange = millis();
+}
+
+void exitApplicationState()
+{
+  applicationState = applicationStatePrevious;
+  timeLastStateChange = millis();
+}
+
 void enterErrorState(int errorCode)
 {
   bool startAnimation = false;
@@ -319,8 +348,7 @@ void enterErrorState(int errorCode)
   {
     applicationState = STATE_ERROR;
     applicationErrorCode = errorCode;
-    timeFirstError = millis();
-    timeLastErrorAnimation = 0;
+    timeLastStateChange = millis();
     startAnimation = true;
   }
   else if (applicationErrorCode != errorCode)
@@ -344,6 +372,7 @@ void exitErrorState()
 
   applicationState = STATE_READY;
   applicationErrorCode = 0;
+  timeLastStateChange = millis();
   clearAnimation();
 }
 
@@ -354,12 +383,10 @@ void handleErrorState()
     return;
   }
 
-  unsigned long time = millis();
-
   // change into standby if blinking for more than 30 minutes
-  if (time - timeFirstError >= 1800000)
+  if (millis() - timeLastStateChange >= 1800000)
   {
-    applicationState = STATE_STANDBY;
+    enterApplicationState(STATE_STANDBY);
     return;
   }
 }
@@ -379,6 +406,10 @@ void checkWifiSignal()
   {
     timeLastWifiConnected = time;
     exitErrorState();
+  }
+  else if (time - timeLastWifiConnected < 10000)
+  {
+    // try a few times before entering error state
   }
   else
   {
@@ -476,7 +507,7 @@ bool callTeamsWebhook()
   if (line == WEBHOOK_RESPONSE_PARTY)
   {
     ledShowPixels(LED_VOICE);
-    sam->Say(audio, "O K. Good luck.");
+    sam->Say(audio, "O K. Let's hope they come.");
     ledHidePixels();
 
     return true;
@@ -513,14 +544,14 @@ bool callTeamsWebhook()
 
 void click()
 {
-  pauseAnimation();
-
   if (applicationState == STATE_STANDBY)
   {
     ESP.reset();
   }
   else if (applicationState == STATE_ERROR)
   {
+    pauseAnimation();
+
     ledShowPixels(LED_VOICE);
     sam->Say(audio, "Sorry guys.");
     ledHidePixels();
@@ -533,10 +564,12 @@ void click()
     sam->Say(audio, "I have an error.");
     ledHidePixels();
     delay(500);
+
+    resumeAnimation();
   }
   else if (applicationState == STATE_READY)
   {
-    applicationState = STATE_PARTY;
+    enterApplicationState(STATE_PARTY);
     animateCircle(false);
     sam->Say(audio, "The party is on.");
     ledHidePixels();
@@ -544,22 +577,74 @@ void click()
     bool stayInPartyMode = callTeamsWebhook();
     if (!stayInPartyMode)
     {
-      applicationState = STATE_READY;
+      exitApplicationState();
       ledShowPixels(LED_ALL);
       animateCircle(true);
+    }
+    else
+    {
+      // setup background animation
+      addAnimationFrame(LED_OUTER_RING, 6000);
+      addAnimationFrame(LED_INNER_RING, 6000);
+      addAnimationFrame(LED_CENTER_DOT, 6000);
+      addAnimationFrame(animateBlink, 1000);
+      addAnimationFrame(LED_OUTER_RING, 6000);
+      addAnimationFrame(LED_CENTER_DOT, 6000);
+      addAnimationFrame(LED_INNER_RING, 6000);
+      addAnimationFrame(LED_ALL, 6000);
+      addAnimationFrame(animateCircleBackward, 1000);
+      addAnimationFrame(animateCircleForward, 6000);
+      addAnimationFrame(LED_NONE, 1000);
+      addAnimationFrame(LED_VOICE, 100);
+      addAnimationFrame(LED_NONE, 100);
+      addAnimationFrame(LED_VOICE, 100);
+      addAnimationFrame(LED_NONE, 100);
+      addAnimationFrame(LED_VOICE, 100);
+      addAnimationFrame(LED_NONE, 1000);
     }
   }
   else if (applicationState == STATE_PARTY)
   {
-    // Do some random fun stuff. Exit using double click
+    pauseAnimation();
+
+    // Do some random fun stuff (exit using double click)
     ledShowPixels(LED_VOICE);
-    sam->Say(audio, "Hell yiaah.");
+    switch (millis() % 5)
+    {
+    case 0:
+      sam->Say(audio, "Hell yiaah.");
+      break;
+    case 1:
+      sam->Say(audio, "Party.");
+      break;
+    case 2:
+      sam->Say(audio, "Beer time.");
+      break;
+    case 3:
+      sam->Say(audio, "Another one.");
+      break;
+    case 4:
+      sam->Say(audio, "Cheers.");
+      break;
+    }
     ledHidePixels();
     delay(100);
-    animateBlink();
-  }
 
-  resumeAnimation();
+    resumeAnimation();
+  }
+  else if (applicationState == STATE_SETTINGS)
+  {
+    // Navigate through settings
+    applicationSettingsCode = (applicationSettingsCode + 1) % 2;
+    if (applicationSettingsCode == SETTINGS_EXIT)
+    {
+      sam->Say(audio, "Exit.");
+    }
+    else if (applicationSettingsCode == SETTINGS_IP)
+    {
+      sam->Say(audio, "I P.");
+    }
+  }
 }
 
 void doubleClick()
@@ -567,10 +652,45 @@ void doubleClick()
   if (applicationState == STATE_PARTY)
   {
     // exit party mode
-    applicationState = STATE_READY;
+    exitApplicationState();
+    clearAnimation();
     ledShowPixels(LED_ALL);
     sam->Say(audio, "Byye bye. See you soon.");
     animateCircle(true);
+  }
+  else if (applicationState == STATE_READY ||
+           applicationState == STATE_ERROR)
+  {
+    pauseAnimation();
+
+    enterApplicationState(STATE_SETTINGS);
+    ledShowPixels(LED_OUTER_RING);
+
+    delay(500); // delay for button noise
+    sam->Say(audio, "Settup.");
+  }
+  else if (applicationState == STATE_SETTINGS)
+  {
+    if (applicationSettingsCode == SETTINGS_EXIT)
+    {
+      // exit settings mode
+      delay(500); // delay for button noise
+      sam->Say(audio, "Leaving settup.");
+
+      exitApplicationState();
+      ledHidePixels();
+
+      resumeAnimation();
+    }
+    else if (applicationSettingsCode == SETTINGS_IP)
+    {
+      // Read IP address
+      delay(1000); // delay for button noise
+      String ip = WiFi.localIP().toString() + ".";
+      char ipString[16];
+      ip.toCharArray(ipString, 16);
+      sam->Say(audio, ipString);
+    }
   }
 }
 
