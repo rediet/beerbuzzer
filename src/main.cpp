@@ -25,6 +25,7 @@ bool LED_ALL[21] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 
 bool LED_INNER_TOP[21] = {0, 1, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 bool LED_OUTER_TOP[21] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1};
 bool LED_ALL_TOP[21] = {1, 1, 1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1};
+bool LED_VOICE[21] = {1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0};
 
 const int STATE_READY = 0;
 const int STATE_ERROR = 1;
@@ -32,6 +33,11 @@ const int STATE_STANDBY = 2;
 const int STATE_PARTY = 3;
 
 const int ERR_NO_WIFI = 1;
+
+const char *BUZZER_PARTY = "PARTY";
+const char *BUZZER_ANNOUNCED = "ANNOUNCED";
+const char *BUZZER_REFUSED = "REFUSED";
+const char *BUZZER_FAILED = "FAILED";
 
 // sensors and output variables
 NeoPixelBus<NeoRgbFeature, NeoEsp8266Uart0800KbpsMethod> strip(PixelCount);
@@ -44,6 +50,7 @@ ESP8266WebServer server(80);
 struct AnimationFrame
 {
   bool *leds;
+  void (*program)(void);
   unsigned long duration;
 };
 
@@ -121,15 +128,21 @@ void ledUnsetPixels()
   strip.ClearTo(RgbColor(0));
 }
 
-/* BACKGROUND ANIMATIONS ----------------------------------------- */
-// adds an animation sequence and automatically triggers animation.
-void addAnimationFrame(bool *pixels, unsigned long duration)
+void ledShowPixels(bool *pixels)
 {
-  AnimationFrame frame;
-  frame.leds = pixels;
-  frame.duration = duration;
+  ledSetPixels(pixels);
+  strip.Show();
+}
 
-  animationBuffer[animationNext] = frame;
+void ledHidePixels()
+{
+  ledUnsetPixels();
+  strip.Show();
+}
+
+/* BACKGROUND ANIMATIONS ----------------------------------------- */
+void onAddAnimationFrame()
+{
   animationNext = (animationNext + 1) % 20;
   if (animationSize < 20)
   {
@@ -140,8 +153,27 @@ void addAnimationFrame(bool *pixels, unsigned long duration)
     animationHead = (animationHead + 1) % 20;
   }
 
-  // init animationNext to immediately start
   timeAnimationNext = millis();
+}
+
+// adds an animation picture
+void addAnimationFrame(bool *pixels, unsigned long duration)
+{
+  AnimationFrame frame;
+  frame.leds = pixels;
+  frame.duration = duration;
+  animationBuffer[animationNext] = frame;
+  onAddAnimationFrame();
+}
+
+// adds an animation program
+void addAnimationFrame(void (*program)(void), unsigned long duration)
+{
+  AnimationFrame frame;
+  frame.program = program;
+  frame.duration = duration;
+  animationBuffer[animationNext] = frame;
+  onAddAnimationFrame();
 }
 
 void handleAnimation()
@@ -158,12 +190,18 @@ void handleAnimation()
   }
 
   AnimationFrame frame = animationBuffer[animationIndex];
-  ledSetPixels(frame.leds);
-  strip.Show();
-  yield();
+  if (frame.leds != NULL)
+  {
+    ledShowPixels(frame.leds);
+  }
+  else
+  {
+    frame.program();
+  }
 
   animationIndex = (animationIndex + 1) % animationSize;
   timeAnimationNext = timeAnimationNext + frame.duration;
+  yield();
 }
 
 void clearAnimation()
@@ -173,21 +211,26 @@ void clearAnimation()
   animationSize = 0;
   animationIndex = 0;
 
-  ledUnsetPixels();
-  strip.Show();
+  ledHidePixels();
   delay(20);
 }
 
 void pauseAnimation()
 {
-  animationPaused = true;
-  timeAnimationPause = millis();
+  if (!animationPaused)
+  {
+    animationPaused = true;
+    timeAnimationPause = millis();
+  }
 }
 
 void resumeAnimation()
 {
-  animationPaused = false;
-  timeAnimationNext = timeAnimationNext + (millis() - timeAnimationPause);
+  if (animationPaused)
+  {
+    animationPaused = false;
+    timeAnimationNext = timeAnimationNext + (millis() - timeAnimationPause);
+  }
 }
 
 /* REGULAR ANIMATIONS -------------------------------------------- */
@@ -258,8 +301,7 @@ void animateWiFiConnect(int duration)
   // wait one cicle before reset
   delay(waitdelay);
 
-  ledUnsetPixels();
-  strip.Show();
+  ledHidePixels();
   delay(20);
 }
 
@@ -357,37 +399,73 @@ void click()
   }
   else if (applicationState == STATE_ERROR)
   {
-    return;
+    ledShowPixels(LED_VOICE);
+    sam->Say(audio, "Sorry guys.");
+    ledHidePixels();
+    delay(500);
+    ledShowPixels(LED_VOICE);
+    sam->Say(audio, "You have to party alone.");
+    ledHidePixels();
+    delay(500);
+    ledShowPixels(LED_VOICE);
+    sam->Say(audio, "I have an error.");
+    ledHidePixels();
+    delay(500);
   }
   else if (applicationState == STATE_READY)
   {
     applicationState = STATE_PARTY;
     animateCircle(false);
     sam->Say(audio, "The party is on.");
+    ledHidePixels();
 
     WiFiClientSecure httpsClient;
     httpsClient.setFingerprint(fingerprint);
     httpsClient.setTimeout(10000); // 10s
-    delay(1000);
 
     logTrace("Connecting to " + String(host));
     int retry = 0;
     int maxRetries = 3;
     while ((!httpsClient.connect(host, 443)) && (retry < maxRetries))
     {
-      delay(100);
+      if (retry == 0)
+      {
+        ledShowPixels(LED_VOICE);
+        sam->Say(audio, "The network is busy.");
+        ledHidePixels();
+      }
+      else
+      {
+        delay(100);
+      }
       retry++;
     }
 
     if (retry == maxRetries)
     {
       logError("Connection failed");
+
+      ledShowPixels(LED_VOICE);
       sam->Say(audio, "Connection failed.");
+      ledHidePixels();
+      delay(500);
+      ledShowPixels(LED_VOICE);
+      sam->Say(audio, "Sorry guys.");
+      ledHidePixels();
+      delay(500);
+      ledShowPixels(LED_VOICE);
+      sam->Say(audio, "You have to party alone.");
+      ledHidePixels();
+      delay(100);
+      return;
     }
     else
     {
       logTrace("Connected");
-      sam->Say(audio, "Connected to server.");
+
+      ledShowPixels(LED_VOICE);
+      sam->Say(audio, "Let's call our friends.");
+      ledHidePixels();
     }
 
     // Do request
@@ -420,17 +498,40 @@ void click()
 
     if (line.length() > 3)
     {
-      sam->Say(audio, "Success.");
+      ledShowPixels(LED_VOICE);
+      sam->Say(audio, "O K. Good luck.");
+      ledHidePixels();
     }
     else
     {
-      sam->Say(audio, "Error.");
+      ledShowPixels(LED_VOICE);
+      sam->Say(audio, "That didn't go well.");
+      ledHidePixels();
+      delay(500);
+      ledShowPixels(LED_VOICE);
+      sam->Say(audio, "I think nobody is coming.");
+      ledHidePixels();
     }
   }
   else if (applicationState == STATE_PARTY)
   {
-    // TODO: change animation and exit with double click instead
+    // Do some random fun stuff. Exit using double click
+    ledShowPixels(LED_VOICE);
+    sam->Say(audio, "Hell yiaah.");
+    ledHidePixels();
+    delay(100);
+    animateBlink();
+  }
+}
+
+void doubleClick()
+{
+  if (applicationState == STATE_PARTY)
+  {
+    // exit party mode
     applicationState = STATE_READY;
+    ledShowPixels(LED_ALL);
+    sam->Say(audio, "Byye bye. See you soon.");
     animateCircle(true);
   }
 }
@@ -474,8 +575,7 @@ void longPress()
     // advance to stage 4 (= application reset)
     longPressStage = 4;
 
-    ledUnsetPixels();
-    strip.Show();
+    ledHidePixels();
     delay(100);
 
     animateBlink();
@@ -487,8 +587,7 @@ void longPressStop()
   bool reset = longPressStage == 4;
   longPressStage = 0;
 
-  ledUnsetPixels();
-  strip.Show();
+  ledHidePixels();
   delay(20);
 
   if (reset)
@@ -531,6 +630,7 @@ void setup()
 
   // setup button
   button.attachClick(click);
+  button.attachDoubleClick(doubleClick);
   button.attachLongPressStart(longPressStart);
   button.attachLongPressStop(longPressStop);
   button.attachDuringLongPress(longPress);
@@ -538,6 +638,10 @@ void setup()
   // setup audio
   audio->begin();
   audio->SetGain(0.1);
+
+  // setup webserver
+  server.on("/", serverSendState);
+  server.begin();
 
   // check Wifi signal for 10s
   int numChecks = 0;
@@ -559,18 +663,22 @@ void setup()
     else
     {
       enterErrorState(ERR_NO_WIFI);
-      return;
+      break;
     }
   }
 
-  // setup webserver
-  server.on("/", serverSendState);
-  server.begin();
-
-  // singal setup complete
-  applicationState = STATE_READY;
-  delay(200);
-  animateBlink();
+  // complete setup
+  if (applicationState != STATE_ERROR)
+  {
+    animateCircle(false);
+    delay(1000);
+    ledHidePixels();
+    delay(20);
+  }
+  else
+  {
+    timeAnimationNext = millis() + 3000;
+  }
 }
 
 void loop()
@@ -579,12 +687,10 @@ void loop()
   server.handleClient();
 
   // do not run other background tasks in standby
-  if (applicationState == STATE_STANDBY)
+  if (applicationState != STATE_STANDBY)
   {
-    return;
+    handleAnimation();
+    handleErrorState();
+    checkWifiSignal();
   }
-
-  handleAnimation();
-  handleErrorState();
-  checkWifiSignal();
 }
