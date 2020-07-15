@@ -39,6 +39,7 @@ const int ERR_NO_WIFI = 1;
 
 const int SETTINGS_EXIT = 0;
 const int SETTINGS_IP = 1;
+const int SETTINGS_VOICE = 2;
 
 const char *WEBHOOK_RESPONSE_PARTY = "PARTY";
 const char *WEBHOOK_RESPONSE_ANNOUNCED = "ANNOUNCED";
@@ -66,6 +67,7 @@ int applicationStatePrevious = -1;
 int applicationErrorCode = 0;
 int applicationSettingsCode = 0;
 int longPressStage = 0;
+ESP8266SAM::SAMVoice voice = ESP8266SAM::VOICE_SAM;
 
 unsigned long timeLongPressStart;
 unsigned long timeLastWifiConnected;
@@ -635,7 +637,7 @@ void click()
   else if (applicationState == STATE_SETTINGS)
   {
     // Navigate through settings
-    applicationSettingsCode = (applicationSettingsCode + 1) % 2;
+    applicationSettingsCode = (applicationSettingsCode + 1) % 3;
     if (applicationSettingsCode == SETTINGS_EXIT)
     {
       sam->Say(audio, "Exit.");
@@ -643,6 +645,10 @@ void click()
     else if (applicationSettingsCode == SETTINGS_IP)
     {
       sam->Say(audio, "I P.");
+    }
+    else if (applicationSettingsCode == SETTINGS_VOICE)
+    {
+      sam->Say(audio, "Choose voice.");
     }
   }
 }
@@ -690,6 +696,35 @@ void doubleClick()
       char ipString[16];
       ip.toCharArray(ipString, 16);
       sam->Say(audio, ipString);
+    }
+    else if (applicationSettingsCode == SETTINGS_VOICE)
+    {
+      voice = static_cast<ESP8266SAM::SAMVoice>((voice + 1) % 6);
+      sam->SetVoice(voice);
+      delay(500); // delay for button noise
+      switch (voice)
+      {
+      case ESP8266SAM::VOICE_SAM:
+        sam->Say(audio, "Sam.");
+        break;
+      case ESP8266SAM::VOICE_ELF:
+        sam->Say(audio, "Elf.");
+        break;
+      case ESP8266SAM::VOICE_ROBOT:
+        sam->Say(audio, "Robot.");
+        break;
+      case ESP8266SAM::VOICE_STUFFY:
+        sam->Say(audio, "Stuffy.");
+        break;
+      case ESP8266SAM::VOICE_OLDLADY:
+        sam->Say(audio, "Old lady.");
+        break;
+      case ESP8266SAM::VOICE_ET:
+        sam->Say(audio, "E T.");
+        break;
+      }
+      delay(500);
+      sam->Say(audio, "The party is on.");
     }
   }
 }
