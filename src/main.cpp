@@ -17,16 +17,14 @@ const char *resource = SECRET_RESOURCE;
 const char fingerprint[] PROGMEM = SECRET_SHA1;
 
 const uint16_t PixelCount = 21;
+bool LED_NONE[21] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 bool LED_CENTER_DOT[21] = {1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 bool LED_INNER_RING[21] = {0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 bool LED_OUTER_RING[21] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
 bool LED_ALL[21] = {1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1};
 bool LED_INNER_TOP[21] = {0, 1, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 bool LED_OUTER_TOP[21] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1};
-bool LED_QUARTER_1[21] = {0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0};
-bool LED_QUARTER_2[21] = {0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0};
-bool LED_QUARTER_3[21] = {0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0};
-bool LED_QUARTER_4[21] = {0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1};
+bool LED_ALL_TOP[21] = {1, 1, 1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1};
 
 const int STATE_READY = 0;
 const int STATE_ERROR = 1;
@@ -42,8 +40,14 @@ AudioOutputI2S *audio = new AudioOutputI2S();
 ESP8266SAM *sam = new ESP8266SAM;
 ESP8266WebServer server(80);
 
+// application objects
+struct AnimationFrame
+{
+  bool *leds;
+  unsigned long duration;
+};
+
 // application states
-int appSchedulerPass = 0;
 int applicationState = 0;
 int applicationErrorCode = 0;
 bool buttonActive = false;
@@ -54,23 +58,33 @@ unsigned long timeLastWifiConnected;
 unsigned long timeLastWifiCheck;
 unsigned long timeFirstError;
 unsigned long timeLastErrorAnimation;
+unsigned long timeAnimationNext;
+unsigned long timeAnimationPause;
 
-int nextMessage = 0;
+String messageBuffer[50];
+int messageHead = 0;
+int messageNext = 0;
 int messageSize = 0;
-int messageStart = 0;
-String messages[50];
 
+AnimationFrame animationBuffer[20];
+int animationHead = 0;
+int animationNext = 0;
+int animationSize = 0;
+int animationIndex = 0;
+bool animationPaused = false;
+
+/* LOGGING ------------------------------------------------------- */
 void logMessage(String message)
 {
-  messages[nextMessage] = message;
-  nextMessage = (nextMessage + 1) % 50;
+  messageBuffer[messageNext] = message;
+  messageNext = (messageNext + 1) % 50;
   if (messageSize < 50)
   {
     messageSize++;
   }
   else
   {
-    messageStart = (messageStart + 1) % 50;
+    messageHead = (messageHead + 1) % 50;
   }
 }
 
@@ -84,6 +98,7 @@ void logError(String message)
   logMessage(String("[Error] " + message));
 }
 
+/* PIXEL HELPERS ------------------------------------------------- */
 // Sets or adds all pixels according to a boolean array (pixel mask)
 void ledSetPixels(bool *pixels, bool add = false)
 {
@@ -106,6 +121,76 @@ void ledUnsetPixels()
   strip.ClearTo(RgbColor(0));
 }
 
+/* BACKGROUND ANIMATIONS ----------------------------------------- */
+// adds an animation sequence and automatically triggers animation.
+void addAnimationFrame(bool *pixels, unsigned long duration)
+{
+  AnimationFrame frame;
+  frame.leds = pixels;
+  frame.duration = duration;
+
+  animationBuffer[animationNext] = frame;
+  animationNext = (animationNext + 1) % 20;
+  if (animationSize < 20)
+  {
+    animationSize++;
+  }
+  else
+  {
+    animationHead = (animationHead + 1) % 20;
+  }
+
+  // init animationNext to immediately start
+  timeAnimationNext = millis();
+}
+
+void handleAnimation()
+{
+  if (animationSize == 0 || animationPaused)
+  {
+    return;
+  }
+
+  unsigned long time = millis();
+  if (time < timeAnimationNext)
+  {
+    return;
+  }
+
+  AnimationFrame frame = animationBuffer[animationIndex];
+  ledSetPixels(frame.leds);
+  strip.Show();
+  yield();
+
+  animationIndex = (animationIndex + 1) % animationSize;
+  timeAnimationNext = timeAnimationNext + frame.duration;
+}
+
+void clearAnimation()
+{
+  animationHead = 0;
+  animationNext = 0;
+  animationSize = 0;
+  animationIndex = 0;
+
+  ledUnsetPixels();
+  strip.Show();
+  delay(20);
+}
+
+void pauseAnimation()
+{
+  animationPaused = true;
+  timeAnimationPause = millis();
+}
+
+void resumeAnimation()
+{
+  animationPaused = false;
+  timeAnimationNext = timeAnimationNext + (millis() - timeAnimationPause);
+}
+
+/* REGULAR ANIMATIONS -------------------------------------------- */
 void animateCircle(bool reverse)
 {
   for (int j = 0; j < PixelCount + 1; j++)
@@ -178,28 +263,33 @@ void animateWiFiConnect(int duration)
   delay(20);
 }
 
-void animateWifiError()
+void startAnimateWifiError()
 {
-  ledSetPixels(LED_CENTER_DOT);
-  ledSetPixels(LED_INNER_TOP, true);
-  ledSetPixels(LED_OUTER_TOP, true);
-  strip.Show();
-  delay(1000);
-
-  ledUnsetPixels();
-  strip.Show();
-  delay(20);
+  addAnimationFrame(LED_ALL_TOP, 1000);
+  addAnimationFrame(LED_NONE, 6000);
 }
 
+/* APPLICATION LOGIC --------------------------------------------- */
 void enterErrorState(int errorCode)
 {
-  applicationErrorCode = errorCode;
-
+  bool startAnimation = false;
   if (applicationState != STATE_ERROR)
   {
     applicationState = STATE_ERROR;
+    applicationErrorCode = errorCode;
     timeFirstError = millis();
     timeLastErrorAnimation = 0;
+    startAnimation = true;
+  }
+  else if (applicationErrorCode != errorCode)
+  {
+    applicationErrorCode = errorCode;
+    startAnimation = true;
+  }
+
+  if (startAnimation)
+  {
+    startAnimateWifiError();
   }
 }
 
@@ -212,6 +302,7 @@ void exitErrorState()
 
   applicationState = STATE_READY;
   applicationErrorCode = 0;
+  clearAnimation();
 }
 
 void handleErrorState()
@@ -228,18 +319,6 @@ void handleErrorState()
   {
     applicationState = STATE_STANDBY;
     return;
-  }
-
-  // blink each 6s
-  if (time - timeLastErrorAnimation >= 6000)
-  {
-    timeLastErrorAnimation = time;
-    switch (applicationErrorCode)
-    {
-    case ERR_NO_WIFI:
-      animateWifiError();
-      break;
-    }
   }
 }
 
@@ -350,6 +429,7 @@ void click()
   }
   else if (applicationState == STATE_PARTY)
   {
+    // TODO: change animation and exit with double click instead
     applicationState = STATE_READY;
     animateCircle(true);
   }
@@ -358,6 +438,7 @@ void click()
 void longPressStart()
 {
   timeLongPressStart = millis();
+  pauseAnimation();
 
   // advance to stage 1
   longPressStage = 1;
@@ -414,6 +495,10 @@ void longPressStop()
   {
     ESP.restart();
   }
+  else
+  {
+    resumeAnimation();
+  }
 }
 
 void serverSendState()
@@ -421,9 +506,10 @@ void serverSendState()
   String log = "Last log entries:\n";
   for (int i = 0; i < messageSize; i++)
   {
-    int index = (i + messageStart) % 50;
-    log.concat(messages[index]);
-    if (!messages[index].endsWith("\n"))
+    // index according circular buffer overflow
+    int index = (i + messageHead) % messageSize;
+    log.concat(messageBuffer[index]);
+    if (!messageBuffer[index].endsWith("\n"))
     {
       log.concat("\n");
     }
@@ -432,6 +518,7 @@ void serverSendState()
   server.send(200, "text/plain", log);
 }
 
+/* SETUP AND LOOP ------------------------------------------------ */
 void setup()
 {
   // setup wifi
@@ -497,15 +584,7 @@ void loop()
     return;
   }
 
-  // primitive scheduling
-  appSchedulerPass = (appSchedulerPass + 1) % 2;
-  switch (appSchedulerPass)
-  {
-  case 0:
-    checkWifiSignal();
-    break;
-  case 1:
-    handleErrorState();
-    break;
-  }
+  handleAnimation();
+  handleErrorState();
+  checkWifiSignal();
 }
