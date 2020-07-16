@@ -218,6 +218,7 @@ void clearAnimation()
   animationNext = 0;
   animationSize = 0;
   animationIndex = 0;
+  animationPaused = false;
 
   ledHidePixels();
   delay(20);
@@ -361,6 +362,7 @@ void enterErrorState(int errorCode)
 
   if (startAnimation)
   {
+    clearAnimation();
     startAnimateWifiError();
   }
 }
@@ -572,7 +574,7 @@ void click()
   else if (applicationState == STATE_READY)
   {
     enterApplicationState(STATE_PARTY);
-    animateCircle(false);
+    animateCircleForward();
     sam->Say(audio, "The party is on.");
     ledHidePixels();
 
@@ -581,7 +583,7 @@ void click()
     {
       exitApplicationState();
       ledShowPixels(LED_ALL);
-      animateCircle(true);
+      animateCircleBackward();
     }
     else
     {
@@ -662,7 +664,7 @@ void doubleClick()
     clearAnimation();
     ledShowPixels(LED_ALL);
     sam->Say(audio, "Byye bye. See you soon.");
-    animateCircle(true);
+    animateCircleBackward();
   }
   else if (applicationState == STATE_READY ||
            applicationState == STATE_ERROR)
@@ -863,7 +865,7 @@ void setup()
   // complete setup
   if (applicationState != STATE_ERROR)
   {
-    animateCircle(false);
+    animateCircleForward();
     delay(1000);
     ledHidePixels();
     delay(20);
