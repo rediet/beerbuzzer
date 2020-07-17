@@ -26,20 +26,25 @@ bool LED_INNER_TOP[21] = {0, 1, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
 bool LED_OUTER_TOP[21] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1};
 bool LED_ALL_TOP[21] = {1, 1, 1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1};
 bool LED_VOICE[21] = {1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0};
+bool LED_QUARTER_1[21] = {1, 1, 1, 1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0};
+bool LED_QUARTER_2[21] = {1, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0};
+bool LED_QUARTER_3[21] = {1, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0};
+bool LED_QUARTER_4[21] = {1, 1, 0, 0, 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1};
 
-// Base states:   READY/ERROR
-// Higher states: PARTY/SETTINGS/STANDBY
+// Base states
 const int STATE_READY = 0;
 const int STATE_ERROR = 1;
-const int STATE_STANDBY = 2;
-const int STATE_PARTY = 3;
+// Higher states
+const int STATE_PARTY = 2;
+const int STATE_WAIT = 3;
 const int STATE_SETTINGS = 4;
+const int STATE_STANDBY = 5;
 
 const int ERR_NO_WIFI = 1;
 
 const int SETTINGS_EXIT = 0;
-const int SETTINGS_IP = 1;
-const int SETTINGS_VOICE = 2;
+const int SETTINGS_VOICE = 1;
+const int SETTINGS_IP = 2;
 
 const char *WEBHOOK_RESPONSE_PARTY = "PARTY";
 const char *WEBHOOK_RESPONSE_ANNOUNCED = "ANNOUNCED";
@@ -149,7 +154,7 @@ void ledHidePixels()
 }
 
 /* BACKGROUND ANIMATIONS ----------------------------------------- */
-void onAddAnimationFrame()
+void afterAddAnimationFrame()
 {
   animationNext = (animationNext + 1) % 20;
   if (animationSize < 20)
@@ -161,7 +166,9 @@ void onAddAnimationFrame()
     animationHead = (animationHead + 1) % 20;
   }
 
+  // setup animation to start immediately at 'head'
   timeAnimationNext = millis();
+  animationIndex = animationHead;
 }
 
 // adds an animation picture
@@ -171,7 +178,7 @@ void addAnimationFrame(bool *pixels, unsigned long duration)
   frame.leds = pixels;
   frame.duration = duration;
   animationBuffer[animationNext] = frame;
-  onAddAnimationFrame();
+  afterAddAnimationFrame();
 }
 
 // adds an animation program
@@ -181,7 +188,7 @@ void addAnimationFrame(void (*program)(void), unsigned long duration)
   frame.program = program;
   frame.duration = duration;
   animationBuffer[animationNext] = frame;
-  onAddAnimationFrame();
+  afterAddAnimationFrame();
 }
 
 void handleAnimation()
@@ -239,6 +246,23 @@ void resumeAnimation()
   {
     animationPaused = false;
     timeAnimationNext = timeAnimationNext + (millis() - timeAnimationPause);
+
+    // repeat last image from before pause
+    if (animationSize > 0)
+    {
+      int animationIndexRepeat = animationIndex - 1;
+      if (animationIndexRepeat < 0)
+      {
+        animationIndexRepeat = animationSize - 1;
+      }
+
+      // show frame (only if static, i.e. not a program)
+      AnimationFrame frame = animationBuffer[animationIndexRepeat];
+      if (frame.leds != NULL)
+      {
+        ledShowPixels(frame.leds);
+      }
+    }
   }
 }
 
@@ -380,17 +404,34 @@ void exitErrorState()
   clearAnimation();
 }
 
-void handleErrorState()
+void handleTimeouts()
 {
-  if (applicationState != STATE_ERROR || longPressStage > 0)
+  if (longPressStage > 0)
   {
     return;
   }
 
-  // change into standby if blinking for more than 30 minutes
-  if (millis() - timeLastStateChange >= 1800000)
+  unsigned int timeSinceStateChange = millis() - timeLastStateChange;
+
+  // change into standby if showing errors for more than 30 minutes
+  if (applicationState == STATE_ERROR && timeSinceStateChange >= 1800000)
   {
     enterApplicationState(STATE_STANDBY);
+    clearAnimation();
+    return;
+  }
+  // automatically exit timeout after 5 minutes
+  else if (applicationState == STATE_WAIT && timeSinceStateChange >= 300000)
+  {
+    exitApplicationState();
+    clearAnimation();
+    return;
+  }
+  // exit party mode after 4 hours
+  else if (applicationState == STATE_PARTY && timeSinceStateChange >= 14400000)
+  {
+    exitApplicationState();
+    clearAnimation();
     return;
   }
 }
@@ -426,7 +467,9 @@ void checkWifiSignal()
   }
 }
 
-// calls the webhook and returns true if the application should stay in party mode
+// Calls the webhook and returns true if the application should stay in party mode.
+// This method only returns false if the party is known to begin later. Errors in
+// transmission do not prevent from partying.
 bool callTeamsWebhook()
 {
   WiFiClientSecure httpsClient;
@@ -584,6 +627,16 @@ void click()
       exitApplicationState();
       ledShowPixels(LED_ALL);
       animateCircleBackward();
+
+      // prevent spamming Teams for a few minutes
+      enterApplicationState(STATE_WAIT);
+
+      // setup background animation (delayed start)
+      addAnimationFrame(LED_QUARTER_1, 2000);
+      addAnimationFrame(LED_QUARTER_2, 2000);
+      addAnimationFrame(LED_QUARTER_3, 2000);
+      addAnimationFrame(LED_QUARTER_4, 2000);
+      timeAnimationNext = millis() + 2000;
     }
     else
     {
@@ -613,7 +666,7 @@ void click()
 
     // Do some random fun stuff (exit using double click)
     ledShowPixels(LED_VOICE);
-    switch (millis() % 5)
+    switch (random(5))
     {
     case 0:
       sam->Say(audio, "Hell yiaah.");
@@ -629,6 +682,35 @@ void click()
       break;
     case 4:
       sam->Say(audio, "Cheers.");
+      break;
+    }
+    ledHidePixels();
+    delay(100);
+
+    resumeAnimation();
+  }
+  else if (applicationState == STATE_WAIT)
+  {
+    pauseAnimation();
+
+    // Prevent spamming and say some words instead (exit using double click)
+    ledShowPixels(LED_VOICE);
+    switch (random(5))
+    {
+    case 0:
+      sam->Say(audio, "It's too early.");
+      break;
+    case 1:
+      sam->Say(audio, "Not yet.");
+      break;
+    case 2:
+      sam->Say(audio, "Maybee later.");
+      break;
+    case 3:
+      sam->Say(audio, "Don't be impatient.");
+      break;
+    case 4:
+      sam->Say(audio, "Please wait some time.");
       break;
     }
     ledHidePixels();
@@ -662,9 +744,26 @@ void doubleClick()
     // exit party mode
     exitApplicationState();
     clearAnimation();
+
     ledShowPixels(LED_ALL);
     sam->Say(audio, "Byye bye. See you soon.");
     animateCircleBackward();
+  }
+  else if (applicationState == STATE_WAIT)
+  {
+    // someone is really tired of waiting...
+    // exit waiting mode
+    exitApplicationState();
+    clearAnimation();
+
+    delay(500); // delay for button noise
+    ledShowPixels(LED_VOICE);
+    sam->Say(audio, "I told you. It's too early.");
+    ledHidePixels();
+    delay(500);
+    ledShowPixels(LED_VOICE);
+    sam->Say(audio, "But you seem to know better.");
+    ledHidePixels();
   }
   else if (applicationState == STATE_READY ||
            applicationState == STATE_ERROR)
@@ -863,6 +962,7 @@ void setup()
   }
 
   // complete setup
+  randomSeed(millis());
   if (applicationState != STATE_ERROR)
   {
     animateCircleForward();
@@ -885,7 +985,7 @@ void loop()
   if (applicationState != STATE_STANDBY)
   {
     handleAnimation();
-    handleErrorState();
+    handleTimeouts();
     checkWifiSignal();
   }
 }
