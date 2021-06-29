@@ -498,7 +498,7 @@ bool callTeamsWebhook()
   // Notify about result and abort if necessary
   if (retry == maxRetries)
   {
-    logError("Connection failed");
+    logError("Connection failed. This may be due to a server downtime or an outdated SHA1 fingerprint.");
 
     ledShowPixels(LED_VOICE);
     sam->Say(audio, "Connection failed.");
