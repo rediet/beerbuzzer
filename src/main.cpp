@@ -45,6 +45,7 @@ const int ERR_NO_WIFI = 1;
 const int SETTINGS_EXIT = 0;
 const int SETTINGS_VOICE = 1;
 const int SETTINGS_IP = 2;
+const int SETTINGS_CONNECTION_TEST = 3;
 
 const char *WEBHOOK_RESPONSE_PARTY = "PARTY";
 const char *WEBHOOK_RESPONSE_ANNOUNCED = "ANNOUNCED";
@@ -72,6 +73,7 @@ int applicationStatePrevious = -1;
 int applicationErrorCode = 0;
 int applicationSettingsCode = 0;
 int longPressStage = 0;
+bool connectionTest = false;
 ESP8266SAM::SAMVoice voice = ESP8266SAM::VOICE_SAM;
 
 unsigned long timeLongPressStart;
@@ -500,6 +502,15 @@ bool callTeamsWebhook()
   {
     logError("Connection failed. This may be due to a server downtime or an outdated SHA1 fingerprint.");
 
+    if(connectionTest)
+    {
+      ledShowPixels(LED_VOICE);
+      sam->Say(audio, "Connection test failed.");
+      ledHidePixels();
+
+      return false;
+    }
+
     ledShowPixels(LED_VOICE);
     sam->Say(audio, "Connection failed.");
     ledHidePixels();
@@ -514,6 +525,16 @@ bool callTeamsWebhook()
     delay(100);
 
     return true;
+  }
+  else if(connectionTest)
+  {
+    logTrace("Connection test successful");
+
+    ledShowPixels(LED_VOICE);
+    sam->Say(audio, "Connection test successful.");
+    ledHidePixels();
+
+    return false;
   }
   else
   {
@@ -622,7 +643,16 @@ void click()
     ledHidePixels();
 
     bool stayInPartyMode = callTeamsWebhook();
-    if (!stayInPartyMode)
+    bool wasConnectionTest = connectionTest;
+    connectionTest = false;
+
+    if (wasConnectionTest) 
+    {
+      exitApplicationState();
+      ledShowPixels(LED_ALL);
+      animateCircleBackward();
+    }
+    else if (!stayInPartyMode)
     {
       exitApplicationState();
       ledShowPixels(LED_ALL);
@@ -721,7 +751,7 @@ void click()
   else if (applicationState == STATE_SETTINGS)
   {
     // Navigate through settings
-    applicationSettingsCode = (applicationSettingsCode + 1) % 3;
+    applicationSettingsCode = (applicationSettingsCode + 1) % 4;
     if (applicationSettingsCode == SETTINGS_EXIT)
     {
       sam->Say(audio, "Exit.");
@@ -733,6 +763,10 @@ void click()
     else if (applicationSettingsCode == SETTINGS_VOICE)
     {
       sam->Say(audio, "Choose voice.");
+    }
+    else if (applicationSettingsCode == SETTINGS_CONNECTION_TEST)
+    {
+      sam->Say(audio, "Connection test.");
     }
   }
 }
@@ -826,6 +860,11 @@ void doubleClick()
       }
       delay(500);
       sam->Say(audio, "The party is on.");
+    }
+    else if (applicationSettingsCode == SETTINGS_CONNECTION_TEST)
+    {
+      connectionTest = true;
+      sam->Say(audio, "Test connection activated once.");
     }
   }
 }
