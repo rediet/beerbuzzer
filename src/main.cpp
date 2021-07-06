@@ -564,15 +564,17 @@ bool callTeamsWebhook()
     }
   }
 
-  // Read result line by line
+  // Read message body
   String line;
   while (httpsClient.available())
   {
     line = httpsClient.readString();
     logTrace(line);
   }
+  if(line == NULL) line = "";
 
-  if (line == WEBHOOK_RESPONSE_PARTY)
+  // Verify response by index since the body may be enclosed (i.e '5\nPARTY\n0')
+  if (line.indexOf(WEBHOOK_RESPONSE_PARTY) >= 0)
   {
     ledShowPixels(LED_VOICE);
     sam->Say(audio, "O K. Let's hope they come.");
@@ -580,7 +582,7 @@ bool callTeamsWebhook()
 
     return true;
   }
-  else if (line == WEBHOOK_RESPONSE_ANNOUNCED)
+  else if (line.indexOf(WEBHOOK_RESPONSE_ANNOUNCED) >= 0)
   {
     ledShowPixels(LED_VOICE);
     sam->Say(audio, "O K. In a few hours.");
@@ -588,7 +590,7 @@ bool callTeamsWebhook()
 
     return false;
   }
-  else if (line == WEBHOOK_RESPONSE_REFUSED)
+  else if (line.indexOf(WEBHOOK_RESPONSE_REFUSED) >= 0)
   {
     ledShowPixels(LED_VOICE);
     sam->Say(audio, "Oh. Its a bad time.");
@@ -970,7 +972,7 @@ void setup()
 
   // setup audio
   audio->begin();
-  audio->SetGain(0.1);
+  audio->SetGain(0.8);
 
   // setup webserver
   server.on("/", serverSendState);
