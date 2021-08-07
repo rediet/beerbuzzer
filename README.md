@@ -1,6 +1,10 @@
 # beerbuzzer
 IoT-Button for Beer-Notifications.
 
+Pressing the button triggers an HTTPS GET request to an arbitrary resource.
+The response is expected to contain a plain text value of either 'PARTY', 'ANNOUNCED', 'REFUSED', or 'FAILED'.
+Based on the response the application will change into party or waiting mode.
+
 
 Technical details
 ------------------------------------------------------------
@@ -19,7 +23,7 @@ Sensors:
 Project setup
 ------------------------------------------------------------
 The file "secrets.h" containing sensitive information like WiFi SSID and password
-as well as the host and resource of the incoming webhook is not under source control.\
+as well as the host and resource used for the webservice request is not under source control.\
 Below is a sample structure:
 
 #define SECRET_SSID "your-wifi-ssid"\
