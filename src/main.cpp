@@ -356,6 +356,61 @@ void startAnimateWifiError()
   addAnimationFrame(LED_NONE, 6000);
 }
 
+/* INTERACTION --------------------------------------------------- */
+void SamSayPartyStarted()
+{
+  switch (random(3))
+  {
+  case 0:
+    sam->Say(audio, "The party is on.");
+    break;
+  case 1:
+    sam->Say(audio, "Let's get the party started.");
+    break;
+  case 2:
+    sam->Say(audio, "Oh my god. It's party time.");
+    break;
+  }
+}
+
+void SamSaySendingMessage()
+{
+  switch (random(3))
+  {
+  case 0:
+    sam->Say(audio, "Time for disco music.");
+    break;
+  case 1:
+    sam->Say(audio, "Connecting to universe.");
+    break;
+  case 2:
+    sam->Say(audio, "Open the bottles.");
+    break;
+  }
+}
+
+void SamSayCheers()
+{
+  switch (random(5))
+  {
+  case 0:
+    sam->Say(audio, "Hell yiaah.");
+    break;
+  case 1:
+    sam->Say(audio, "Party.");
+    break;
+  case 2:
+    sam->Say(audio, "Beer time.");
+    break;
+  case 3:
+    sam->Say(audio, "Another one.");
+    break;
+  case 4:
+    sam->Say(audio, "Cheers.");
+    break;
+  }
+}
+
 /* APPLICATION LOGIC --------------------------------------------- */
 void enterApplicationState(int state)
 {
@@ -476,6 +531,7 @@ bool callTeamsWebhook()
 {
   WiFiClientSecure httpsClient;
   httpsClient.setFingerprint(fingerprint);
+  // httpsClient.setInsecure(); // <- use for test purposes
   httpsClient.setTimeout(10000); // 10s
 
   // Connect to host (normally this step is fast)
@@ -502,7 +558,7 @@ bool callTeamsWebhook()
   {
     logError("Connection failed. This may be due to a server downtime or an outdated SHA1 fingerprint.");
 
-    if(connectionTest)
+    if (connectionTest)
     {
       ledShowPixels(LED_VOICE);
       sam->Say(audio, "Connection test failed.");
@@ -526,7 +582,7 @@ bool callTeamsWebhook()
 
     return true;
   }
-  else if(connectionTest)
+  else if (connectionTest)
   {
     logTrace("Connection test successful");
 
@@ -541,7 +597,7 @@ bool callTeamsWebhook()
     logTrace("Connected");
 
     ledShowPixels(LED_VOICE);
-    sam->Say(audio, "Let's call our friends.");
+    SamSaySendingMessage();
     ledHidePixels();
   }
 
@@ -571,7 +627,11 @@ bool callTeamsWebhook()
     line = httpsClient.readString();
     logTrace(line);
   }
-  if(line == NULL) line = "";
+
+  if (line == NULL)
+  {
+    line = "";
+  }
 
   // Verify response by index since the body may be enclosed (i.e '5\nPARTY\n0')
   if (line.indexOf(WEBHOOK_RESPONSE_PARTY) >= 0)
@@ -641,14 +701,14 @@ void click()
   {
     enterApplicationState(STATE_PARTY);
     animateCircleForward();
-    sam->Say(audio, "The party is on.");
+    SamSayPartyStarted();
     ledHidePixels();
 
     bool stayInPartyMode = callTeamsWebhook();
     bool wasConnectionTest = connectionTest;
     connectionTest = false;
 
-    if (wasConnectionTest) 
+    if (wasConnectionTest)
     {
       exitApplicationState();
       ledShowPixels(LED_ALL);
@@ -698,24 +758,7 @@ void click()
 
     // Do some random fun stuff (exit using double click)
     ledShowPixels(LED_VOICE);
-    switch (random(5))
-    {
-    case 0:
-      sam->Say(audio, "Hell yiaah.");
-      break;
-    case 1:
-      sam->Say(audio, "Party.");
-      break;
-    case 2:
-      sam->Say(audio, "Beer time.");
-      break;
-    case 3:
-      sam->Say(audio, "Another one.");
-      break;
-    case 4:
-      sam->Say(audio, "Cheers.");
-      break;
-    }
+    SamSayCheers();
     ledHidePixels();
     delay(100);
 
